@@ -112,11 +112,17 @@ function nrf_dfu {
                        -p $(find_device_tty ${DEFAULT_COMM_SN})
 }
 
-#Usage: [application_hex] [output_hex]
+#Usage: family [application_hex] [output_hex]
 function nrf_dfu_gen_settings {
     
-    if [ -n "${1}" ]; then
-        hex_file=$1
+    if [ $# -eq 0 ]; then
+        "Usage: family [application_hex] [output_hex]"
+    fi
+    
+    family=${1}
+    
+    if [ -n "${2}" ]; then
+        hex_file=$2
     else
         hex_file=$(pick_hex_file)
     fi
@@ -126,20 +132,20 @@ function nrf_dfu_gen_settings {
         return 1
     fi
     
-    if [ -n "${2}" ]; then
-        SETTINGS_FILE="${2}"
+    if [ -n "${3}" ]; then
+        settings_file="${3}"
     else
-        SETTINGS_FILE="settings.hex"
+        settings_file="settings.hex"
     fi
     
-    echo "Writing settings for ${hex_file} to ${SETTINGS_FILE}"
+    echo "Writing settings for ${hex_file} to ${settings_file}"
     
-    nrfutil settings generate --family ${NRF_SOC_TYPE} \
+    nrfutil settings generate --family ${family} \
                               --application ${hex_file} \
                               --application-version 1 \
                               --bootloader-version 1 \
                               --bl-settings-version 1 \
-                              ${SETTINGS_FILE}
+                                ${settings_file}
 }
 
 
@@ -170,6 +176,8 @@ function nrf_rtt {
     (
         # Prevent CTRL-C from stopping the function
         trap : INT
+        # Give JLinkExe a bit of time to prevent 'Connection refused' error
+        sleep 1
         telnet 127.0.0.1 ${rtt_port}
     )
     
@@ -220,7 +228,8 @@ function nrf_flash {
     
     if [ ${FLASH_SETTINGS} -eq 1 ]; then
         settings_file=$(mktemp)
-        nrf_dfu_gen_settings ${hex_file} ${settings_file}
+        family="NRF$(read_device_part ${serial_no})"
+        nrf_dfu_gen_settings ${family} ${hex_file} ${settings_file}
         soc_flash ${settings_file} ${serial_no}
     fi
 
@@ -234,6 +243,20 @@ function nrf_flash {
 function nrf_erase {
   serial_no=$(pick_device)
   soc_erase ${serial_no}
+}
+
+# Usage: nrf_cli
+function nrf_cli {
+    serial_no=$(pick_device)
+    port=$(find_device_tty ${serial_no})
+    
+    echo "Opening ${port} for device ${serial_no}"
+    
+    picocom --omap delbs -b 115200 ${port}
+    while [ $? -ne 0 ]; do
+        sleep 1
+        picocom --omap delbs -b 115200 ${port}
+    done
 }
 
 ########################################################################
