@@ -18,15 +18,17 @@ Functions
 =========
 
 `nrf_make [args]`
-Build using selected defaults. Instead of going into the folder where
+Build using selected Makefile. Instead of going into the folder where
 the makefile is you can run `nrf_make` directly from the example folder.
 The function will find the makefile, cd to the location and run `make`.
+If there are multiple Makefiles present then allows for selecting one.
 
 Additional arguments are passed to `make` command.
 
 `nrf_flash [hex]`
 Flash using selected defaults. If hex file isn't specified the function
-will try to find one in subfolders.
+will try to find one in subfolders. If there are multiple Development
+Kits attached then allows for selecting which one should be flashed.
 
 `nrf_sign`
 Sing hexfile and generate a package. The function will try to find a
@@ -42,3 +44,5 @@ Perform DFU over BLE.
 Starts JLinkExe in the background and telnet in the forground. Exit by
 opening telent prompt (Ctrl+]) and typing 'q'.
 
+`nrf_cli`
+Opens picocom terminal for a Development Kit selected by SEGGER ID.
