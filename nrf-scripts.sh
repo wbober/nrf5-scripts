@@ -201,18 +201,28 @@ function nrf_make {
     )
 }
 
-# Usage: nrf_flash [--with-settings] [file.hex]
+# Usage: nrf_flash [-s segger] [-w] [hex]
 function nrf_flash {
-    serial_no=$(pick_device)
+    local flash_settings=0
+    local serial_no=""
+    # We need to set OPTIND to local to properly handle consecutive calls to 
+    # getopts. This is because getopts uses OPTIND to track an index of the next
+    # option to be parsed. If this is global then the following fails:
+    #    $ foo -s bar
+    #    $ foo -s bar
+    # This is because in the second call OPTIND is set to 3 hence there is 
+    # nothing to parse.
+    local OPTIND opt
 
-    if [ "${1}" == "--with-settings" ]; then
-        echo "Flashing settings"
-        FLASH_SETTINGS=1
-        shift
-    else
-        FLASH_SETTINGS=0
-    fi
-    
+    while getopts ":s:w" opt; do
+        echo ${opt} ${OPTARG}
+        case ${opt} in
+            s) serial_no=${OPTARG};;
+            w) flash_settings=1;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
     if [ -n "${1}" ]; then
         hex_file="${1}"
     else
@@ -220,13 +230,16 @@ function nrf_flash {
     fi
     
     if [ -z ${hex_file} ]; then
-        echo "Hex file not found"
+        echo "No hex file provided"
         return 1
     fi
+
+    if [ -z ${serial_no} ]; then
+        serial_no=$(pick_device)
+    fi
     
-    echo "${hex_file}"
-    
-    if [ ${FLASH_SETTINGS} -eq 1 ]; then
+    if [ ${flash_settings} -eq 1 ]; then
+        echo "Flashing settings to ${serial_no}"
         settings_file=$(mktemp)
         family="NRF$(read_device_part ${serial_no})"
         nrf_dfu_gen_settings ${family} ${hex_file} ${settings_file}
@@ -234,6 +247,7 @@ function nrf_flash {
     fi
 
     (
+        echo "Flashing ${hex_file} to ${serial_no}"
         soc_flash ${hex_file} ${serial_no}
         soc_reset ${serial_no}
     )
