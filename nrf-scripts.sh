@@ -3,6 +3,14 @@ if [ -e ${HOME}/.nrfconfig ]; then
     source ${HOME}/.nrfconfig
 fi
 
+function open_serial_port {
+    picocom --omap delbs -b ${1} ${2}
+    while [ $? -ne 0 ]; do
+        sleep 1
+        picocom --omap delbs -b ${1} ${2}
+    done
+}
+
 function soc_flash {
     nrfjprog -f nrf52 --program $1 --sectorerase -s $2
 }
@@ -31,22 +39,24 @@ function read_device_variant {
 # used with jlink.
 # Args: serial_no
 function get_jlink_device_type {
-  
-  part=$(read_device_part $1)
-  variant=$(read_device_variant $1 | cut -c7-8 | xxd -p -r)
-  
-  device_type="nrf${part}_xxA${variant}"
-  echo ${device_type}
+    local part=$(read_device_part $1)
+    local variant=$(read_device_variant $1 | cut -c7-8 | xxd -p -r)
+    local device_type="nrf${part}_xxA${variant}"
+    echo ${device_type}
 }
 
 # Find JLINK tty by its serial number.
 function find_device_tty {
-    ttys=$(ls /dev/ttyACM?)
+    local ttys=$(ls /dev/ttyACM?)
+    local sn
+
     for tty in $ttys; do
-        serial_no=$(udevadm info --query=property --name ${tty} | \
-                    awk 'BEGIN {FS="="} $1 == "ID_SERIAL_SHORT" {print($2)}')
-        if [ $serial_no -eq $1 ]; then
+        sn=$(udevadm info --query=property --name ${tty} | \
+             awk 'BEGIN {FS="="} $1 == "ID_SERIAL_SHORT" {print($2)}')
+
+        if [ $sn -eq $1 ]; then
             echo ${tty}
+            return
         fi
     done
 }
@@ -54,7 +64,9 @@ function find_device_tty {
 # If there are more than one dev kit then
 # display a dialog to pick one.
 function pick_device {
-    ids=$(nrfjprog -i)
+    local ids=$(nrfjprog -i)
+    local sn
+
     if [ $(echo -e "$ids" | wc -l) -gt 1 ]; then 
         sn=$(echo -e "$ids" | pick) 
     else
@@ -64,7 +76,9 @@ function pick_device {
 }
 
 function pick_hex_file {
-    hex_files=$(find -name *.hex)
+    local hex_files=$(find -name *.hex)
+    local file
+
     if [ $(echo -e "$hex_files" | wc -l) -gt 1 ]; then 
         file=$(echo -e "$hex_files" | pick) 
     else
@@ -78,7 +92,8 @@ function pick_hex_file {
 ########################################################################
 
 function nrf_sign {
-    
+    local hex_file
+
     if [ $# -eq 1 ]; then
         hex_file=$1
     else
@@ -100,6 +115,8 @@ function nrf_sign {
 }
 
 function nrf_dfu {
+    local pkg_file
+
     if [ $# -eq 1 ]; then
         pkg_file=$1
     else
@@ -114,12 +131,14 @@ function nrf_dfu {
 
 #Usage: family [application_hex] [output_hex]
 function nrf_dfu_gen_settings {
-    
+    local hex_file
+    local settings_file
+
     if [ $# -eq 0 ]; then
         "Usage: family [application_hex] [output_hex]"
     fi
     
-    family=${1}
+    local family=${1}
     
     if [ -n "${2}" ]; then
         hex_file=$2
@@ -151,16 +170,17 @@ function nrf_dfu_gen_settings {
 
 # Attach RTT to a device.
 function nrf_rtt {
-    sn=$(pick_device)
-    script=$(mktemp)
-    rtt_port=$(( 19021 + $(pidof JLinkExe | wc -w) ))
+    local sn=$(pick_device)
+    local script=$(mktemp)
+    local rtt_port=$(( 19021 + $(pidof JLinkExe | wc -w) ))
+    local ranges
     
     if [ -e *.ld ]; then
       ranges=$(cat *.ld | gawk 'match($0, "RAM.*ORIGIN = ([0-9a-fA-Fx]+), LENGTH = ([0-9a-fA-Fx]+)", a) {print a[1] " " a[2]}')
       echo -e "exec SetRTTSearchRanges $ranges\n" >> ${script}
     fi
     
-    device_type=$(get_jlink_device_type ${sn})
+    local device_type=$(get_jlink_device_type ${sn})
     echo ${device_type}
     
     nohup JLinkExe -device ${device_type} \
@@ -187,7 +207,7 @@ function nrf_rtt {
 # Build binary for the default board.
 function nrf_make {
     (
-        targets=$(find -type d -name armgcc)
+        local targets=$(find -type d -name armgcc)
         
         if [ $(echo -e "$targets" | wc -l) -gt 1 ]; then 
             target=$(echo -e "$targets" | pick) 
@@ -201,9 +221,10 @@ function nrf_make {
     )
 }
 
-# Usage: nrf_flash [-s segger] [-w] [hex]
+# Usage: nrf_flash [-s segger] [-e] [-w] [hex]
 function nrf_flash {
     local flash_settings=0
+    local full_erase=0
     local serial_no=""
     # We need to set OPTIND to local to properly handle consecutive calls to 
     # getopts. This is because getopts uses OPTIND to track an index of the next
@@ -214,10 +235,11 @@ function nrf_flash {
     # nothing to parse.
     local OPTIND opt
 
-    while getopts ":s:w" opt; do
+    while getopts ":s:we" opt; do
         echo ${opt} ${OPTARG}
         case ${opt} in
             s) serial_no=${OPTARG};;
+            e) full_erase=1;;
             w) flash_settings=1;;
         esac
     done
@@ -237,6 +259,11 @@ function nrf_flash {
     if [ -z ${serial_no} ]; then
         serial_no=$(pick_device)
     fi
+
+    if [ ${full_erase} -eq 1 ]; then
+        echo "Performing full erase"
+        soc_erase ${serial_no}
+    fi
     
     if [ ${flash_settings} -eq 1 ]; then
         echo "Flashing settings to ${serial_no}"
@@ -255,23 +282,28 @@ function nrf_flash {
 
 # Usage: nrf_erase
 function nrf_erase {
-  serial_no=$(pick_device)
-  soc_erase ${serial_no}
+    local serial_no=$(pick_device)
+    soc_erase ${serial_no}
 }
 
 # Usage: nrf_cli
 function nrf_cli {
-    serial_no=$(pick_device)
-    port=$(find_device_tty ${serial_no})
+    local serial_no=$(pick_device)
+    local port=$(find_device_tty ${serial_no})
     
     echo "Opening ${port} for device ${serial_no}"
-    
-    picocom --omap delbs -b 115200 ${port}
-    while [ $? -ne 0 ]; do
-        sleep 1
-        picocom --omap delbs -b 115200 ${port}
-    done
+    open_serial_port 115200 ${port}    
 }
+
+# Usage: nrf_log
+function nrf_log {
+    local serial_no=$(pick_device)
+    local port=$(find_device_tty ${serial_no})
+    
+    echo "Opening ${port} for device ${serial_no}"
+    open_serial_port 1000000 ${port}
+}
+
 
 ########################################################################
 # Bluetooth helpers
