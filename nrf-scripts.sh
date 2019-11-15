@@ -54,7 +54,7 @@ function find_device_tty {
         sn=$(udevadm info --query=property --name ${tty} | \
              awk 'BEGIN {FS="="} $1 == "ID_SERIAL_SHORT" {print($2)}')
 
-        if [ $sn -eq $1 ]; then
+        if [ $sn == $1 ]; then
             echo ${tty}
             return
         fi
