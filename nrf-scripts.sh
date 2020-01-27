@@ -1,13 +1,28 @@
+if [[ "$(uname -a | cut -f3 -d' ')" =~ .*-microsoft-.* ]]; then 
+    IS_WSL=1
+else
+    IS_WSL=0
+fi
+
 if [ -e ${HOME}/.nrfconfig ]; then
     cat ${HOME}/.nrfconfig
     source ${HOME}/.nrfconfig
 fi
 
 function open_serial_port {
-    picocom --omap delbs -b ${1} ${2}
+    local TERMAPP
+
+    if [ ${IS_WSL} -eq 1 ]; then
+        TERMAPP="plink.exe -sercfg ${1},8,n,1,N -serial ${2}"
+    else
+        TERMAPP="picocom --omap delbs -b ${1} ${2}"
+    fi
+
+    ${TERMAPP}
+
     while [ $? -ne 0 ]; do
         sleep 1
-        picocom --omap delbs -b ${1} ${2}
+        ${TERMAPP}
     done
 }
 
@@ -61,6 +76,54 @@ function find_device_tty {
             return
         fi
     done
+}
+
+# Query Windows registry and remove CR characters.
+function reg_q()
+{
+    reg.exe query $* | tr -d '\r'
+}
+
+# Extract registry value from a result of "req_q [key] /s" query.
+function req_q_get_value()
+{
+    echo "$1" | awk "\$1 == \"$2\" { print \$3 }" | head -n1
+}
+
+# Find JLINK COM port by its serial number.
+function find_device_com {
+    local ROOT='HKLM\SYSTEM\CurrentControlSet\Enum\USB'
+    local VID="1366"
+    local SEGGER_ENTRIES=$(reg_q $ROOT | grep VID_${VID})
+
+    for ENTRY in ${SEGGER_ENTRIES}; do
+        for SUB_ENTRY in $(reg_q "${ENTRY}"); do
+            SUB_ENTRY_VALUE=$(reg_q "${SUB_ENTRY}" /s)
+            SERVICE=$(req_q_get_value "${SUB_ENTRY_VALUE}" "Service")
+
+            if [ "${SERVICE}" == "usbccgp" ]; then
+                SEGGER_ID=$(echo -n "${SUB_ENTRY}" | sed -r -n 's/^.*\\[0]+([0-9]+)$/\1/p')
+                if [ "${SEGGER_ID}" == "$1" ]; then
+                    SEGGER_PARENT_ID_PREFIX=$(req_q_get_value "${SUB_ENTRY_VALUE}" "ParentIdPrefix")
+                fi
+            elif [ "${SERVICE}" == "JLinkCDC" ]; then
+                PARENT_ID_PREFIX=$(echo -n "${SUB_ENTRY}" | sed -r -n 's/.*\\([a-f0-9&]+)$/\1/p')
+                if [[ "${PARENT_ID_PREFIX}" =~ ${SEGGER_PARENT_ID_PREFIX}.* ]]; then
+                    echo "$(req_q_get_value "${SUB_ENTRY_VALUE}" "PortName")"
+                    return
+                fi
+            fi
+        done
+    done
+}
+
+# Find JLINK port by its serial number.
+function find_device_port {
+    if [ ${IS_WSL} -eq 1 ]; then
+        echo "$(find_device_com "${1}")"
+    else
+        echo "$(find_device_tty "${1}")"
+    fi
 }
 
 # If there are more than one dev kit then
@@ -291,7 +354,7 @@ function nrf_erase {
 # Usage: nrf_cli
 function nrf_cli {
     local serial_no=$(pick_device)
-    local port=$(find_device_tty ${serial_no})
+    local port=$(find_device_port ${serial_no})
     
     echo "Opening ${port} for device ${serial_no}"
     open_serial_port 115200 ${port}    
@@ -300,7 +363,7 @@ function nrf_cli {
 # Usage: nrf_log
 function nrf_log {
     local serial_no=$(pick_device)
-    local port=$(find_device_tty ${serial_no})
+    local port=$(find_device_port ${serial_no})
     
     echo "Opening ${port} for device ${serial_no}"
     open_serial_port 1000000 ${port}
