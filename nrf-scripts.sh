@@ -9,6 +9,10 @@ if [ -e ${HOME}/.nrfconfig ]; then
     source ${HOME}/.nrfconfig
 fi
 
+if [ -z ${FINDER} ]; then
+    FINDER='fzy'
+fi
+
 function open_serial_port {
     local TERMAPP
 
@@ -133,7 +137,7 @@ function pick_device {
     local sn
 
     if [ $(echo -e "$ids" | wc -l) -gt 1 ]; then 
-        sn=$(echo -e "$ids" | pick) 
+        sn=$(echo -e "$ids" | ${FINDER}) 
     else
         sn=$ids
     fi
@@ -145,7 +149,7 @@ function pick_hex_file {
     local file
 
     if [ $(echo -e "$hex_files" | wc -l) -gt 1 ]; then 
-        file=$(echo -e "$hex_files" | pick) 
+        file=$(echo -e "$hex_files" | ${FINDER}) 
     else
         file=$hex_files
     fi
@@ -275,7 +279,7 @@ function nrf_make {
         local targets=$(find -type d -name armgcc)
         
         if [ $(echo -e "$targets" | wc -l) -gt 1 ]; then 
-            target=$(echo -e "$targets" | pick) 
+            target=$(echo -e "$targets" | ${FINDER}) 
         else
             target=$targets
         fi
@@ -411,7 +415,7 @@ function bt_bda_find
 function bt_ipsp_connect
 {
   if [ $# -eq 1 ]; then
-    addr=$(bt_le_list | pick | cut -f1 -d" ")
+    addr=$(bt_le_list | ${FINDER} | cut -f1 -d" ")
     addr_type=$1
   elif [ $# -eq 2 ]; then
     if [ $1 == '--name' ]; then
