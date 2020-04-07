@@ -129,7 +129,7 @@ function find_device_port {
 # If there are more than one dev kit then
 # display a dialog to pick one.
 function pick_device {
-    local ids=$(nrfjprog -i)
+    local ids=$(nrfjprog -i | sort)
     local sn
 
     if [ $(echo -e "$ids" | wc -l) -gt 1 ]; then 
